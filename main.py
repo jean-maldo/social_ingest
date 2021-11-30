@@ -269,6 +269,10 @@ def loop_search(
     print("Total number of results: ", total_tweets)
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == "__main__":
-    loop_search()
+    loop_search(
+        keyword="terremoto lang:es",
+        max_results=100,
+        max_count=1000,
+        csv_filename="terremoto_data_test.csv"
+    )
