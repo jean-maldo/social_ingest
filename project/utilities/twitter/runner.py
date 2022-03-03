@@ -1,107 +1,17 @@
 import datetime
-import os
-from typing import Dict, Tuple
+import re
 
 import csv
 import dateutil.parser
+import pandas as pd
 from pytz import utc
-import requests
 import time
 
-
-def auth() -> str:
-    """
-    Get Environment Variable for the Authentication Token that's required for calling the Twitter API v2
-
-    Returns
-    -------
-    str
-        The Twitter token
-    """
-    return os.getenv("BEARER_TOKEN")
+from project.utilities.twitter.api_handler import auth, create_headers, create_users_url, connect_to_endpoint, \
+    create_url
 
 
-def create_headers(bearer_token: str) -> Dict:
-    """
-    Creates the HTTP headers required to call the Twitter v2 API using the Authentication Bearer Token
-
-    Parameters
-    ----------
-    bearer_token
-        The Twitter Authentication token
-
-    Returns
-    -------
-    Dict
-        A dictionary containing the header information for the HTTP request
-    """
-    headers = {"Authorization": f"Bearer {bearer_token}"}
-    return headers
-
-
-def create_url(keyword: str, start_date: str, end_date: str, max_results: int = 10) -> Tuple[str, Dict[str, str]]:
-    """
-    Creates a URL endpoint to get recent tweets from the Twitter v2 API.
-
-    Parameters
-    ----------
-    keyword
-        The search query
-    start_date
-        Date to get tweets from. Must be a maximum of 7 days ago.
-    end_date
-        Date to get tweets until. Must be less than the current date time.
-    max_results
-        The maximum number of results for pagination.
-
-    Returns
-    -------
-    str
-        URL Endpoint for the Twitter v2 API
-    """
-    search_url = "https://api.twitter.com/2/tweets/search/recent"
-
-    query_params = {"query": keyword,
-                    "start_time": start_date,
-                    "end_time": end_date,
-                    "max_results": max_results,
-                    "expansions": "author_id,in_reply_to_user_id,geo.place_id",
-                    "tweet.fields": ("id,text,author_id,in_reply_to_user_id,geo,conversation_id,created_at,lang,"
-                                     "public_metrics,referenced_tweets,reply_settings,source"),
-                    "user.fields": "id,name,username,created_at,description,public_metrics,verified",
-                    "place.fields": "full_name,id,country,country_code,geo,name,place_type",
-                    "next_token": {}}
-    return search_url, query_params
-
-
-def connect_to_endpoint(url: str, headers: Dict, params: Dict, next_token: str = None) -> Dict:
-    """
-    Execute a HTTP Request to the Twitter v2 API and return the JSON response.
-    Parameters
-    ----------
-    url
-        The Twitter v2 API Endpoint.
-    headers
-        The HTTP Headers containing the Authentication token.
-    params
-        The params dictionary to use for the API endpoint.
-    next_token
-        The token for the next response page.
-
-    Returns
-    -------
-    Dict
-        The JSON response
-    """
-    params["next_token"] = next_token   # params object received from create_url function
-    response = requests.request("GET", url, headers=headers, params=params)
-    print("Endpoint Response Code: " + str(response.status_code))
-    if response.status_code != 200:
-        raise Exception(response.status_code, response.text)
-    return response.json()
-
-
-def append_to_csv(json_response: any, file_name: str):
+def append_to_csv(json_response: any, file_name: str) -> int:
     """
     Parses the JSON Twitter API response and writes the results to a file.
 
@@ -129,11 +39,29 @@ def append_to_csv(json_response: any, file_name: str):
         created_at = dateutil.parser.parse(tweet.get("created_at"))
 
         # 3. Geolocation
-        try:
-            geo = tweet.get("geo")
-            geo = geo.get("place_id")
-        except AttributeError:
-            geo = None
+        if "geo" in tweet.keys():
+            geo = tweet.get("geo").get("place_id")
+            try:
+                lat = tweet.get("geo").get("coordinates").get("coordinates")[0]
+                long = tweet.get("geo").get("coordinates").get("coordinates")[1]
+            except AttributeError:
+                continue
+
+            place_name = None
+            place_full_name = None
+            place_country = None
+            place_country_code = None
+
+            includes = json_response.get("includes")
+            if "places" in includes.keys():
+                for place in includes.get("places"):
+                    if place["id"] == geo:
+                        place_name = place.get("name")
+                        place_full_name = place.get("full_name")
+                        place_country = place.get("country")
+                        place_country_code = place.get("country_code")
+        else:
+            continue
 
         # 4. Tweet ID
         tweet_id = tweet.get("id")
@@ -154,8 +82,8 @@ def append_to_csv(json_response: any, file_name: str):
         text = tweet.get("text")
 
         # Assemble all data in a list
-        res = [author_id, created_at, geo, tweet_id, lang, like_count, quote_count, reply_count, retweet_count, source,
-               text]
+        res = [author_id, created_at, geo, lat, long, place_name, place_full_name, place_country, place_country_code,
+               tweet_id, lang, like_count, quote_count, reply_count, retweet_count, source, text]
 
         # Append the result to the CSV file
         csv_writer.writerow(res)
@@ -166,6 +94,7 @@ def append_to_csv(json_response: any, file_name: str):
 
     # Print the number of tweets for this iteration
     print(f"{counter} Tweets added from this response")
+    return counter
 
 
 def loop_search(
@@ -217,7 +146,8 @@ def loop_search(
 
     # Create headers for the data you want to save, in this example
     csv_writer.writerow(
-        ["author_id", "created_at", "geo", "id", "lang", "like_count", "quote_count", "reply_count", "retweet_count",
+        ["author_id", "created_at", "geo", "lat", "long", "place_name", "place_full_name", "place_country",
+         "place_country_code", "id", "lang", "like_count", "quote_count", "reply_count", "retweet_count",
          "source", "tweet"])
     csv_file.close()
 
@@ -244,10 +174,11 @@ def loop_search(
                 print("Next Token: ", next_token)
                 if result_count is not None and result_count > 0 and next_token is not None:
                     print("Start Date: ", start_list[i])
-                    append_to_csv(json_response, csv_filename)
-                    count += result_count
+                    tweets_added = append_to_csv(json_response, csv_filename)
+                    count += tweets_added
                     total_tweets += result_count
-                    print(f"Added {total_tweets} Tweets")
+                    print("Total # of Tweets scanned: ", total_tweets)
+                    print("Total # of Tweets with Geo data parsed: ", count)
                     print("-------------------")
                     time.sleep(5)
             # If no next token exists
@@ -255,10 +186,11 @@ def loop_search(
                 if result_count is not None and result_count > 0:
                     print("-------------------")
                     print("Start Date: ", start_list[i])
-                    append_to_csv(json_response, csv_filename)
-                    count += result_count
+                    tweets_added = append_to_csv(json_response, csv_filename)
+                    count += tweets_added
                     total_tweets += result_count
-                    print("Total # of Tweets added: ", total_tweets)
+                    print("Total # of Tweets scanned: ", total_tweets)
+                    print("Total # of Tweets with Geo data parsed: ", count)
                     print("-------------------")
                     time.sleep(5)
 
@@ -269,10 +201,54 @@ def loop_search(
     print("Total number of results: ", total_tweets)
 
 
-if __name__ == "__main__":
-    loop_search(
-        keyword="terremoto lang:es",
-        max_results=100,
-        max_count=1000,
-        csv_filename="terremoto_data_test.csv"
-    )
+def get_locations():
+    df = pd.read_csv("data/temblor_data.csv", dtype={'author id': object})
+    author_ids = df["author id"].to_list()
+    author_ids = [x for x in author_ids if re.match(r'^\d+$', x) is not None]
+
+    # Inputs for tweets
+    bearer_token = auth()
+    headers = create_headers(bearer_token)
+
+    user_locations = []
+
+    for batch in range((len(author_ids)//100) + 1):
+        batch_start = batch*100
+        batch_end = batch*100 + 100
+        batch_end = len(author_ids) if batch_end > len(author_ids) else batch_end
+        print(batch_start, batch_end)
+        url, params = create_users_url(author_ids[batch_start:batch_end])
+        json_response = connect_to_endpoint(url, headers, params, None)
+
+        for user in json_response["data"]:
+            user_locations.append([user.get("id"), user.get("location")])
+
+    df_user_location = pd.DataFrame(user_locations, columns=["Name", "Age"])
+
+    df_user_location.to_csv("user_locations.csv")
+
+
+def tweets_add_locations():
+    df_locations = pd.read_csv("data/locations_clean.csv", dtype={'author_id': object})
+    df_temblor = pd.read_csv("data/temblor_data.csv", dtype={'author id': object})
+    user_location = {}
+
+    for index, row in df_locations.iterrows():
+        user_location[row["author_id"]] = {
+            "lat": row["lat"],
+            "long": row["long"],
+            "city": row["city"],
+            "country": row["country"]
+        }
+
+    for index, row in df_temblor.iterrows():
+        try:
+            # print(f"""looking up {row["author id"]}""")
+            df_temblor.loc[index, "lat"] = user_location[row["author id"]]["lat"]
+            df_temblor.loc[index, "long"] = user_location[row["author id"]]["long"]
+            df_temblor.loc[index, "city"] = user_location[row["author id"]]["city"]
+            df_temblor.loc[index, "country"] = user_location[row["author id"]]["country"]
+            print("added")
+        except KeyError:
+            pass
+            # print(f"""{row["author id"]} not found""")
