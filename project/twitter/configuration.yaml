@@ -1,0 +1,14 @@
+endpoints:
+  search:
+    url: https://api.twitter.com/2/tweets/search/recent
+    params:
+      expansions: author_id,in_reply_to_user_id,geo.place_id
+      tweet.fields: id,text,author_id,in_reply_to_user_id,geo,conversation_id,created_at,lang,public_metrics,referenced_tweets,reply_settings,source
+      user.fields: id,name,username,created_at,description,public_metrics,verified
+      place.fields: full_name,id,country,country_code,geo,name,place_type,contained_within
+      next_token: {}
+  users:
+    url: https://api.twitter.com/2/users
+    params:
+      expansions: pinned_tweet_id
+      user.fields: created_at,description,entities,id,location,name,pinned_tweet_id,profile_image_url,protected,url,username,verified,withheld

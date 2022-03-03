@@ -1,14 +1,14 @@
-import datetime
 import re
 
 import csv
 import dateutil.parser
 import pandas as pd
-from pytz import utc
 import time
 
-from project.utilities.twitter.api_handler import auth, create_headers, create_users_url, connect_to_endpoint, \
-    create_url
+from project.twitter.api_handler import append_config_params, connect_to_endpoint, create_headers
+from project.twitter.configuration import config
+from project.twitter.endpoint_type import EndpointType
+from project.utilities import dates
 
 
 def append_to_csv(json_response: any, file_name: str) -> int:
@@ -121,21 +121,7 @@ def loop_search(
         The name of the file to write results to
     """
     # Inputs for tweets
-    bearer_token = auth()
-    headers = create_headers(bearer_token)
-    base = datetime.datetime.now(utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    start_list = [(base - datetime.timedelta(days=x)).strftime("%Y-%m-%dT%H:%M:%S.000Z") for x in range(7)]
-    start_list.append(
-        (datetime.datetime.now(utc) - datetime.timedelta(days=7) + datetime.timedelta(hours=1))
-        .strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    )
-    start_list.reverse()
-
-    base = datetime.datetime.now(utc).replace(hour=23, minute=59, second=59, microsecond=999999)
-    today_end = (datetime.datetime.now(utc) - datetime.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    end_list = [(base - datetime.timedelta(days=x)).strftime("%Y-%m-%dT%H:%M:%S.000Z") for x in range(8)]
-    end_list[0] = today_end
-    end_list.reverse()
+    headers = create_headers()
 
     # Total number of tweets we collected from the loop
     total_tweets = 0
@@ -151,6 +137,9 @@ def loop_search(
          "source", "tweet"])
     csv_file.close()
 
+    start_list = dates.get_start_list(7)
+    end_list = dates.get_end_list(7)
+
     for i in range(0, len(start_list)):
 
         # Inputs
@@ -164,7 +153,17 @@ def loop_search(
                 break
             print("-------------------")
             print("Token: ", next_token)
-            url, params = create_url(keyword, start_list[i], end_list[i], max_results)
+
+            url = config.search_url
+            search_params = {
+                "query": keyword,
+                "start_time": start_list[i],
+                "end_time": end_list[i],
+                "max_results": max_results
+            }
+
+            params = append_config_params(search_params, EndpointType.SEARCH, config)
+
             json_response = connect_to_endpoint(url, headers, params, next_token)
             result_count = json_response["meta"]["result_count"]
 
@@ -207,8 +206,7 @@ def get_locations():
     author_ids = [x for x in author_ids if re.match(r'^\d+$', x) is not None]
 
     # Inputs for tweets
-    bearer_token = auth()
-    headers = create_headers(bearer_token)
+    headers = create_headers()
 
     user_locations = []
 
@@ -217,7 +215,12 @@ def get_locations():
         batch_end = batch*100 + 100
         batch_end = len(author_ids) if batch_end > len(author_ids) else batch_end
         print(batch_start, batch_end)
-        url, params = create_users_url(author_ids[batch_start:batch_end])
+
+        url = config.users_url
+        users_params = {
+            "ids": author_ids[batch_start:batch_end]
+        }
+        params = append_config_params(users_params, EndpointType.USERS, config)
         json_response = connect_to_endpoint(url, headers, params, None)
 
         for user in json_response["data"]:
