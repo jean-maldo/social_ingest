@@ -1,6 +1,9 @@
+import logging
 import re
 
 import csv
+from typing import Dict
+
 import dateutil.parser
 import pandas as pd
 import time
@@ -9,6 +12,9 @@ from project.twitter.api_handler import append_config_params, connect_to_endpoin
 from project.twitter.configuration import config
 from project.twitter.endpoint_type import EndpointType
 from project.utilities import dates
+from utilities.transformers import clean_locations
+
+logger = logging.getLogger(__name__)
 
 
 def append_to_csv(json_response: any, file_name: str) -> int:
@@ -200,10 +206,10 @@ def loop_search(
     print("Total number of results: ", total_tweets)
 
 
-def get_locations():
-    df = pd.read_csv("data/temblor_data.csv", dtype={'author id': object})
+def get_author_locations(tweet_data_file: str) -> Dict:
+    df = pd.read_csv(tweet_data_file, dtype={'author id': object})
     author_ids = df["author id"].to_list()
-    author_ids = [x for x in author_ids if re.match(r'^\d+$', x) is not None]
+    author_ids = [_id for _id in author_ids if re.match(r'^\d+$', _id) is not None]
 
     # Inputs for tweets
     headers = create_headers()
@@ -211,10 +217,10 @@ def get_locations():
     user_locations = []
 
     for batch in range((len(author_ids)//100) + 1):
-        batch_start = batch*100
-        batch_end = batch*100 + 100
+        batch_start = batch * 100
+        batch_end = batch * 100 + 100
         batch_end = len(author_ids) if batch_end > len(author_ids) else batch_end
-        print(batch_start, batch_end)
+        logger.info(f"Batch {batch_start} to {batch_end}")
 
         url = config.users_url
         users_params = {
@@ -226,32 +232,23 @@ def get_locations():
         for user in json_response["data"]:
             user_locations.append([user.get("id"), user.get("location")])
 
-    df_user_location = pd.DataFrame(user_locations, columns=["Name", "Age"])
+    df_user_location = pd.DataFrame(user_locations, columns=["author_id", "location"])
+    return clean_locations(df_user_location, "project/utilities/reference/world_cities.csv")
 
-    df_user_location.to_csv("user_locations.csv")
 
+def tweets_add_locations(tweet_data_file: str = "project/data/temblor_data.csv"):
+    df_tweets = pd.read_csv(tweet_data_file, dtype={'author id': object})
 
-def tweets_add_locations():
-    df_locations = pd.read_csv("data/locations_clean.csv", dtype={'author_id': object})
-    df_temblor = pd.read_csv("data/temblor_data.csv", dtype={'author id': object})
-    user_location = {}
+    user_location = get_author_locations(tweet_data_file)
 
-    for index, row in df_locations.iterrows():
-        user_location[row["author_id"]] = {
-            "lat": row["lat"],
-            "long": row["long"],
-            "city": row["city"],
-            "country": row["country"]
-        }
-
-    for index, row in df_temblor.iterrows():
+    for index, row in df_tweets.iterrows():
         try:
-            # print(f"""looking up {row["author id"]}""")
-            df_temblor.loc[index, "lat"] = user_location[row["author id"]]["lat"]
-            df_temblor.loc[index, "long"] = user_location[row["author id"]]["long"]
-            df_temblor.loc[index, "city"] = user_location[row["author id"]]["city"]
-            df_temblor.loc[index, "country"] = user_location[row["author id"]]["country"]
-            print("added")
+            logger.debug(f"""looking up {row["author id"]}""")
+            df_tweets.loc[index, "lat"] = user_location[row["author_id"]]["lat"]
+            df_tweets.loc[index, "long"] = user_location[row["author_id"]]["long"]
+            df_tweets.loc[index, "city"] = user_location[row["author_id"]]["city"]
+            df_tweets.loc[index, "country"] = user_location[row["author_id"]]["country"]
         except KeyError:
             pass
-            # print(f"""{row["author id"]} not found""")
+            logger.warning(f"""{row["author id"]} not found in locations lookup""")
+    df_tweets.to_csv(tweet_data_file)

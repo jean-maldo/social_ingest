@@ -1,11 +1,11 @@
 import argparse
 
-from project.utilities.twitter.runner import loop_search, get_locations
+from project.twitter.runner import loop_search, tweets_add_locations
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Python Twitter v2 API to CSV")
     parser.add_argument('--search', action='store_true')
-    parser.add_argument('--user_location', action='store_true')
+    parser.add_argument('--add-locations', action='store_true')
 
     args = parser.parse_args()
 
@@ -16,5 +16,5 @@ if __name__ == "__main__":
             max_count=1000,
             csv_filename="project/data/earthquake_data_test.csv"
         )
-    elif args.user_location:
-        get_locations()
+    elif args.add_locations:
+        tweets_add_locations()
