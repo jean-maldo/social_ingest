@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class Configuration:
     def __init__(self):
         print(os.getcwd())
-        with open("project/twitter/configuration.yaml", "r") as f:
+        with open("project/twitter/config/configuration.yaml", "r") as f:
             conf = yaml.safe_load(f)
 
         self._conf = conf

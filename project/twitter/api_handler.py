@@ -4,8 +4,8 @@ from typing import Dict
 
 import requests
 
-from twitter.configuration import Configuration
-from twitter.endpoint_type import EndpointType
+from twitter.config.configuration import Configuration
+from project.twitter.endpoint_type import EndpointType
 
 logger = logging.getLogger(__name__)
 

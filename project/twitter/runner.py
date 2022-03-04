@@ -1,24 +1,24 @@
 import logging
 import re
-
-from typing import List, Dict
+from typing import Dict, List
 
 import dateutil.parser
 import pandas as pd
 import time
 
 from project.twitter.api_handler import append_config_params, connect_to_endpoint, create_headers
-from project.twitter.configuration import config
+from twitter.config.configuration import config
 from project.twitter.endpoint_type import EndpointType
 from project.utilities import dates
-from utilities.transformers import clean_locations
+from project.utilities.transformers import clean_locations
 
 logger = logging.getLogger(__name__)
 
 
 def append_to_csv(df_headers: List, json_response: any) -> (int, pd.DataFrame):
     """
-    Parses the JSON Twitter API response and writes the results to a file.
+    Parses the JSON Twitter API response, filters for tweets that have location data, and returns a DataFrame
+    with the tweets that do.
 
     Parameters
     ----------
@@ -108,9 +108,9 @@ def search_tweets(
         days: int = 7
 ):
     """
-    Generates the start and end date lists for the last 7 days. Loops through every day in the list to get the defined
-    number of tweets per day. Creates/overwrite CSV file at start of run and then appends API results to the CSV file.
-    Adds a 5 second delay between API calls to not spam the API.
+    Loops through every day in the dates lists to get the defined number of tweets per day.
+    Builds a DataFrame with results and writes 1 CSVs file for every day in the dates list.
+    Adds a 2 second delay between API calls to not spam the API.
 
     Parameters
     ----------
@@ -204,6 +204,20 @@ def search_tweets(
 
 
 def get_author_locations(tweet_data_file: str) -> Dict:
+    """
+    Hits the twitter users API Endpoint to get location data to build a lookup dictionary. Uses a world cities
+    reference file to validate country/cities.
+
+    Parameters
+    ----------
+    tweet_data_file
+        The file with twitter data that contains author_id column to get location data for.
+
+    Returns
+    -------
+    A dictionary to be used as a lookup for author_id -> location data
+
+    """
     df = pd.read_csv(tweet_data_file, dtype={'author id': object})
     author_ids = df["author id"].to_list()
     author_ids = [_id for _id in author_ids if re.match(r'^\d+$', _id) is not None]
@@ -234,6 +248,15 @@ def get_author_locations(tweet_data_file: str) -> Dict:
 
 
 def tweets_add_locations(tweet_data_file: str = "project/data/tweet_data.csv"):
+    """
+    Calls the get_author_locations() function to build the lookup dictionary and then updates the provided
+    file with location data.
+
+    Parameters
+    ----------
+    tweet_data_file
+        The file with twitter data that has author_id column.
+    """
     df_tweets = pd.read_csv(tweet_data_file, dtype={'author id': object})
 
     user_location = get_author_locations(tweet_data_file)
