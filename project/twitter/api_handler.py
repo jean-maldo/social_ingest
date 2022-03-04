@@ -84,7 +84,7 @@ def connect_to_endpoint(url: str, headers: Dict, params: Dict, next_token: str =
     """
     params["next_token"] = next_token   # params object received from create_url function
     response = requests.request("GET", url, headers=headers, params=params)
-    print("Endpoint Response Code: " + str(response.status_code))
+    logger.info("Endpoint Response Code: " + str(response.status_code))
     if response.status_code != 200:
         raise Exception(response.status_code, response.text)
     return response.json()

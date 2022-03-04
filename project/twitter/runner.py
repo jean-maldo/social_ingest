@@ -1,8 +1,7 @@
 import logging
 import re
 
-import csv
-from typing import Dict
+from typing import List, Dict
 
 import dateutil.parser
 import pandas as pd
@@ -17,24 +16,21 @@ from utilities.transformers import clean_locations
 logger = logging.getLogger(__name__)
 
 
-def append_to_csv(json_response: any, file_name: str) -> int:
+def append_to_csv(df_headers: List, json_response: any) -> (int, pd.DataFrame):
     """
     Parses the JSON Twitter API response and writes the results to a file.
 
     Parameters
     ----------
+    df_headers
+        The headers to use for the DataFrame
     json_response
         The JSON response from the Twitter v2 API.
-    file_name
-        The name of the CSV file to append results to.
     """
     # A counter variable
     counter = 0
 
-    # Open OR create the target CSV file
-    csv_file = open(file_name, "a", newline="", encoding="utf-8")
-    csv_writer = csv.writer(csv_file)
-
+    tweets = []
     # Loop through each tweet
     for tweet in json_response.get("data"):
 
@@ -88,26 +84,28 @@ def append_to_csv(json_response: any, file_name: str) -> int:
         text = tweet.get("text")
 
         # Assemble all data in a list
-        res = [author_id, created_at, geo, lat, long, place_name, place_full_name, place_country, place_country_code,
-               tweet_id, lang, like_count, quote_count, reply_count, retweet_count, source, text]
+        tweets.append([author_id, created_at, geo, lat, long, place_name, place_full_name, place_country,
+                       place_country_code, tweet_id, lang, like_count, quote_count, reply_count, retweet_count,
+                       source, text])
 
         # Append the result to the CSV file
-        csv_writer.writerow(res)
         counter += 1
 
-    # When done, close the CSV file
-    csv_file.close()
+    try:
+        df_tweets = pd.DataFrame(tweets, columns=df_headers)
+        logger.info(f"{counter} Tweets added from this response")
+    except ValueError as e:
+        logger.error(e)
+        df_tweets = pd.DataFrame(columns=df_headers)
+    return counter, df_tweets
 
-    # Print the number of tweets for this iteration
-    print(f"{counter} Tweets added from this response")
-    return counter
 
-
-def loop_search(
-        keyword: str = "temblor lang:es",
+def search_tweets(
+        keyword: str,
+        csv_filename:  str,
         max_results: int = 100,
         max_count: int = 1000,
-        csv_filename: str = "temblor_data_test.csv"
+        days: int = 7
 ):
     """
     Generates the start and end date lists for the last 7 days. Loops through every day in the list to get the defined
@@ -119,32 +117,25 @@ def loop_search(
     keyword
         The search query for the Twitter v2 API. See API docs for more info on building search queries:
         https://developer.twitter.com/en/docs/twitter-api/tweets/search/integrate/build-a-query
-    max_results
-        Set max results per page for the API response
-    max_count
-        Max tweets per time period
     csv_filename
-        The name of the file to write results to
+        The name of the file to write results to.
+    max_results
+        Set max results per page for the API response.
+    max_count
+        Max tweets per time period.
+    days
+        The number of days from today to search tweets for.
     """
-    # Inputs for tweets
-    headers = create_headers()
-
     # Total number of tweets we collected from the loop
     total_tweets = 0
 
-    # Create file
-    csv_file = open(csv_filename, "w", newline="", encoding="utf-8")
-    csv_writer = csv.writer(csv_file)
+    # Define DataFrame
+    df_headers = ["author_id", "created_at", "geo", "lat", "long", "place_name", "place_full_name", "place_country",
+                  "place_country_code", "id", "lang", "like_count", "quote_count", "reply_count", "retweet_count",
+                  "source", "tweet"]
 
-    # Create headers for the data you want to save, in this example
-    csv_writer.writerow(
-        ["author_id", "created_at", "geo", "lat", "long", "place_name", "place_full_name", "place_country",
-         "place_country_code", "id", "lang", "like_count", "quote_count", "reply_count", "retweet_count",
-         "source", "tweet"])
-    csv_file.close()
-
-    start_list = dates.get_start_list(7)
-    end_list = dates.get_end_list(7)
+    start_list = dates.get_start_list(days)
+    end_list = dates.get_end_list(days)
 
     for i in range(0, len(start_list)):
 
@@ -152,58 +143,64 @@ def loop_search(
         count = 0  # Counting tweets per time period
         flag = True
         next_token = None
+        df_user_location = pd.DataFrame(columns=df_headers)
 
         while flag:
             # Check if max_count reached
             if count >= max_count:
                 break
-            print("-------------------")
-            print("Token: ", next_token)
+            logger.info(f"Token: {next_token}")
 
             url = config.search_url
+            start_date = start_list[i].strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            end_date = end_list[i].strftime("%Y-%m-%dT%H:%M:%S.000Z")
             search_params = {
                 "query": keyword,
-                "start_time": start_list[i],
-                "end_time": end_list[i],
+                "start_time": start_date,
+                "end_time": end_date,
                 "max_results": max_results
             }
 
             params = append_config_params(search_params, EndpointType.SEARCH, config)
-
-            json_response = connect_to_endpoint(url, headers, params, next_token)
+            json_response = connect_to_endpoint(url, create_headers(), params, next_token)
             result_count = json_response["meta"]["result_count"]
 
             if "next_token" in json_response["meta"]:
                 # Save the token to use for next call
                 next_token = json_response["meta"]["next_token"]
-                print("Next Token: ", next_token)
+                logger.info(f"Next Token: {next_token}")
                 if result_count is not None and result_count > 0 and next_token is not None:
-                    print("Start Date: ", start_list[i])
-                    tweets_added = append_to_csv(json_response, csv_filename)
+                    logger.info(f"Start Date: {start_date}")
+                    logger.info(f"End Date: {end_date}")
+                    tweets_added, tweets_extracted = append_to_csv(df_headers, json_response)
+                    df_user_location = pd.concat([df_user_location, tweets_extracted], ignore_index=True)
                     count += tweets_added
                     total_tweets += result_count
-                    print("Total # of Tweets scanned: ", total_tweets)
-                    print("Total # of Tweets with Geo data parsed: ", count)
-                    print("-------------------")
-                    time.sleep(5)
+                    logger.info(f"Total # of Tweets scanned: {total_tweets}")
+                    logger.info(f"Total # of Tweets with Geo data parsed: {count}")
+                    time.sleep(2)
             # If no next token exists
             else:
                 if result_count is not None and result_count > 0:
-                    print("-------------------")
-                    print("Start Date: ", start_list[i])
-                    tweets_added = append_to_csv(json_response, csv_filename)
+                    logger.info(f"Start Date: {start_date}")
+                    logger.info(f"End Date: {end_date}")
+                    tweets_added, tweets_extracted = append_to_csv(df_headers, json_response)
+                    df_user_location = pd.concat([df_user_location, tweets_extracted], ignore_index=True)
                     count += tweets_added
                     total_tweets += result_count
-                    print("Total # of Tweets scanned: ", total_tweets)
-                    print("Total # of Tweets with Geo data parsed: ", count)
-                    print("-------------------")
-                    time.sleep(5)
+                    logger.info(f"Total # of Tweets scanned: {total_tweets}")
+                    logger.info(f"Total # of Tweets with Geo data parsed: {count}")
+                    time.sleep(2)
 
                 # Since this is the final request, turn flag to false to move to the next time period.
                 flag = False
                 next_token = None
-            time.sleep(5)
-    print("Total number of results: ", total_tweets)
+            time.sleep(2)
+        date_format = end_list[i].strftime("%Y%m%d")
+        filename = f"project/data/{date_format}_{csv_filename}.csv"
+        logger.info(f"Writing to {filename}")
+        df_user_location.to_csv(filename)
+    logger.info(f"Total number of results: {total_tweets}")
 
 
 def get_author_locations(tweet_data_file: str) -> Dict:
@@ -236,7 +233,7 @@ def get_author_locations(tweet_data_file: str) -> Dict:
     return clean_locations(df_user_location, "project/utilities/reference/world_cities.csv")
 
 
-def tweets_add_locations(tweet_data_file: str = "project/data/temblor_data.csv"):
+def tweets_add_locations(tweet_data_file: str = "project/data/tweet_data.csv"):
     df_tweets = pd.read_csv(tweet_data_file, dtype={'author id': object})
 
     user_location = get_author_locations(tweet_data_file)
