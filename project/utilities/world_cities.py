@@ -19,6 +19,6 @@ class WorldCities:
         for index, row in self.df_cities.iterrows():
             cities_lookup[row["country"] + row["city_ascii"]] = {
                 "lat": row["lat"],
-                "long": row["lng"]
+                "lon": row["lng"]
             }
         return cities_lookup

@@ -31,7 +31,7 @@ def _get_country_city(countries: List, location: str) -> (str, str):
             city_lookup = city_lookup.replace(country_clean, "")
             country_lookup = country_clean
 
-    return country_lookup, re.sub(r'[^\w\s]', "", city_lookup)
+    return country_lookup, re.sub(r'[^\w\s]', "", city_lookup).strip()
 
 
 def clean_locations(user_locations: pd.DataFrame, world_cities_file: str) -> Dict:
@@ -44,21 +44,21 @@ def clean_locations(user_locations: pd.DataFrame, world_cities_file: str) -> Dic
     user_locations
         The user locations DataFrame to get location data for.
     world_cities_file
-        The reference table to use for country, city, and lat long values.
+        The filepath to the reference table to use for country, city, and lat/long values.
     """
     df_locations = user_locations.dropna()
 
     wc = WorldCities(world_cities_file)
-    country_lookup, city_lookup = _get_country_city(wc.countries, df_locations["location"])
 
     user_location = {}
     for index, row in df_locations.iterrows():
+        country_lookup, city_lookup = _get_country_city(wc.countries, row["location"])
         country_cities_lookup = wc.country_city_ref
         try:
             lookup_value = country_lookup.strip() + city_lookup.strip()
             user_location[row["author_id"]] = {
                 "lat": country_cities_lookup[lookup_value]["lat"],
-                "long": country_cities_lookup[lookup_value]["long"],
+                "lon": country_cities_lookup[lookup_value]["lon"],
                 "city": city_lookup,
                 "country": country_lookup
             }

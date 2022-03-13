@@ -218,7 +218,7 @@ def get_author_locations(tweet_data_file: str) -> Dict:
     A dictionary to be used as a lookup for author_id -> location data
 
     """
-    df = pd.read_csv(tweet_data_file, dtype={'author id': object})
+    df = pd.read_csv(tweet_data_file, dtype={'author_id': object})
     author_ids = df["author id"].to_list()
     author_ids = [_id for _id in author_ids if re.match(r'^\d+$', _id) is not None]
 
